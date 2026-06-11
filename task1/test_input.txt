@@ -1,0 +1,11 @@
+Hello World! This is a test file for TCP Socket Programming.
+The quick brown fox jumps over the lazy dog.
+ABCDEFGHIJKLMNOPQRSTUVWXYZ
+Networking is fun and educational.
+Computer Networks course design project.
+Python TCP socket programming with custom application layer protocol.
+1234567890
+Repeated text for testing chunk boundaries and verification logic.
+The server must reverse each chunk byte by byte.
+Multiple clients should be supported concurrently.
+This is the final line of the test input file.
