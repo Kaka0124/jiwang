@@ -1,14 +1,15 @@
 """
 UDP 协议模块 —— Task2 共享常量与工具函数
 
-报文头部（16 字节）：
+报文头部（20 字节）：
   偏移  大小  字段
   0     2     报文类型（uint16 大端序）
-  2     4     序列号（uint32 大端序）—— 字节流中的偏移量
-  6     4     确认号（uint32 大端序）—— 下一个期望的字节序号
-  10    2     校验和（uint16 大端序）—— IP 风格的 16-bit 反码求和
-  12    2     数据长度（uint16 大端序）—— 负载的字节数
-  14    2     保留 / 窗口大小
+  2     4     StudentID（uint32 大端序）—— 学号后5位，连接建立报文必填
+  6     4     序列号（uint32 大端序）—— 字节流中的偏移量
+  10    4     确认号（uint32 大端序）—— 下一个期望的字节序号
+  14    2     校验和（uint16 大端序）—— IP 风格的 16-bit 反码求和
+  16    2     数据长度（uint16 大端序）—— 负载的字节数
+  18    2     保留 / 窗口大小
 
 报文类型：
   0x0001 = SYN      — 连接请求（三次握手第1步）
@@ -24,8 +25,12 @@ import struct
 import enum
 import time
 
-HEADER_SIZE = 16
-HEADER_FORMAT = "!HIIHHH"  # type(2) + seq(4) + ack(4) + checksum(2) + data_len(2) + reserved(2)
+HEADER_SIZE = 20
+# type(2) + student_id(4) + seq(4) + ack(4) + checksum(2) + data_len(2) + reserved(2)
+HEADER_FORMAT = "!HIIIHHH"
+
+# ============ 学号配置（改成你自己的学号后5位）============
+STUDENT_ID = 0          # TODO: 填写你的学号后5位，例如 6271
 
 
 class UDPType(enum.IntEnum):
@@ -86,46 +91,58 @@ def checksum(data: bytes) -> int:
     return (~total) & 0xFFFF
 
 
-def pack_message(msg_type: int, seq: int, ack: int, payload: bytes, reserved: int = 0) -> bytes:
+def pack_message(msg_type: int, seq: int, ack: int, payload: bytes,
+                 student_id: int = None, reserved: int = 0) -> bytes:
     """
     将报文打包为字节流。
+
+    参数：
+        msg_type:   报文类型
+        seq:        序列号
+        ack:        确认号
+        payload:    负载数据
+        student_id: 学号后5位（默认使用全局 STUDENT_ID）
+        reserved:   保留字段
 
     校验和分两趟计算：
       1. 先用 checksum=0 构建头部
       2. 计算头部+负载的校验和
       3. 用正确的校验和重新构建头部
     """
+    if student_id is None:
+        student_id = STUDENT_ID
     data_len = len(payload)
     # 第一趟：校验和=0
-    header = struct.pack(HEADER_FORMAT, msg_type, seq, ack, 0, data_len, reserved)
+    header = struct.pack(HEADER_FORMAT, msg_type, student_id, seq, ack, 0, data_len, reserved)
     # 计算校验和
     csum = checksum(header + payload)
     # 第二趟：填入正确校验和
-    header = struct.pack(HEADER_FORMAT, msg_type, seq, ack, csum, data_len, reserved)
+    header = struct.pack(HEADER_FORMAT, msg_type, student_id, seq, ack, csum, data_len, reserved)
     return header + payload
 
 
 def unpack_message(data: bytes) -> dict:
     """
     解析 UDP 报文。
-    返回字典包含：type, seq, ack, checksum, data_len, reserved, payload, valid_checksum
+    返回字典包含：type, student_id, seq, ack, checksum, data_len, reserved, payload, valid_checksum
     """
     if len(data) < HEADER_SIZE:
         raise ValueError(f"报文太短：{len(data)} 字节 < {HEADER_SIZE} 字节")
 
-    msg_type, seq, ack, csum, data_len, reserved = struct.unpack(
+    msg_type, student_id, seq, ack, csum, data_len, reserved = struct.unpack(
         HEADER_FORMAT, data[:HEADER_SIZE])
     payload = data[HEADER_SIZE:HEADER_SIZE + data_len] if data_len > 0 else b""
 
     # 验证校验和（校验和为0则跳过）
     valid = True
     if csum != 0:
-        zero_header = struct.pack(HEADER_FORMAT, msg_type, seq, ack, 0, data_len, reserved)
+        zero_header = struct.pack(HEADER_FORMAT, msg_type, student_id, seq, ack, 0, data_len, reserved)
         calc = checksum(zero_header + payload)
         valid = (calc == csum)
 
     return {
         "type": msg_type,
+        "student_id": student_id,
         "seq": seq,
         "ack": ack,
         "checksum": csum,

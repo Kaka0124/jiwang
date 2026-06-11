@@ -115,7 +115,8 @@ class UDPServer:
 
     def _handle_syn(self, msg: dict, addr: tuple):
         """处理 SYN：三次握手 第1步→第2步"""
-        client_seq = msg["seq"]  # 客户端初始序列号
+        client_seq = msg["seq"]     # 客户端初始序列号
+        student_id = msg.get("student_id", 0)  # 客户端学号后5位
 
         # 初始化客户端状态
         server_isn = random.randint(0, 2**31 - 1)
@@ -125,9 +126,11 @@ class UDPServer:
             "expected_seq": client_seq + 1,  # 下一个期望的数据字节序号
             "received_data": bytearray(),
             "packets_received": 0,
+            "client_student_id": student_id,
         }
 
-        log(f"[服务端] [{addr[0]}:{addr[1]}] 收到 SYN（client_seq={client_seq}）→ SYN_RCVD")
+        log(f"[服务端] [{addr[0]}:{addr[1]}] 收到 SYN（client_seq={client_seq}，"
+            f"StudentID={student_id}）→ SYN_RCVD")
         log(f"[服务端] [{addr[0]}:{addr[1]}] 发送 SYN-ACK（server_seq={server_isn}，"
             f"ack={client_seq + 1}）")
 

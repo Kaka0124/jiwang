@@ -26,6 +26,7 @@ from udp_protocol import (
     pack_message, unpack_message,
     WINDOW_SIZE, TIMEOUT_MS,
     MTU_PAYLOAD, TOTAL_PACKETS,
+    STUDENT_ID,
     timestamp, time_ms,
 )
 
@@ -304,9 +305,9 @@ def main():
     max_syn_retries = 5
     for syn_attempt in range(max_syn_retries):
         if syn_attempt > 0:
-            log(f"[客户端] → SYN（seq={client_isn}）—— 重试 #{syn_attempt}")
+            log(f"[客户端] → SYN（seq={client_isn}，StudentID={STUDENT_ID}）—— 重试 #{syn_attempt}")
         else:
-            log(f"[客户端] → SYN（seq={client_isn}）")
+            log(f"[客户端] → SYN（seq={client_isn}，StudentID={STUDENT_ID}）")
         syn_pkt = pack_message(UDPType.SYN, client_isn, 0, b"")
         sock.sendto(syn_pkt, server_addr)
 
