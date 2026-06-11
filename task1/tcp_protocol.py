@@ -3,7 +3,7 @@ TCP 协议模块 —— Task1 共享常量与工具函数
 
 报文头部（8 字节）：
   偏移  大小  字段
-  0     1     报文类型（0x01=Initial, 0x02=ReverseRequest, 0x03=ReverseAnswer, 0x04=Close）
+  0     1     报文类型（0x01=Initialization, 0x02=agree, 0x03=reverseRequest, 0x04=reverseAnswer）
   1     3     保留字段
   4     4     负载长度（大端序 uint32）
 
@@ -20,19 +20,19 @@ HEADER_FORMAT = "!B3xI"  # 类型(1B) + 保留(3B) + 长度(4B)，大端序
 
 
 class MessageType(enum.IntEnum):
-    """四种报文类型"""
-    INITIAL = 0x01          # 初始连接报文（客户端→服务端）
-    REVERSE_REQUEST = 0x02  # 反转请求（客户端→服务端，携带待反转数据）
-    REVERSE_ANSWER = 0x03   # 反转应答（服务端→客户端，携带反转后数据）
-    CLOSE = 0x04            # 关闭连接报文（服务端→客户端）
+    """四种报文类型（按任务书要求）"""
+    INITIALIZATION = 0x01   # 客户端→服务端：告知要反转的块数 N
+    AGREE = 0x02            # 服务端→客户端：同意连接
+    REVERSE_REQUEST = 0x03  # 客户端→服务端：携带待反转数据
+    REVERSE_ANSWER = 0x04   # 服务端→客户端：携带反转后数据
 
 
 # 日志可读名称
 TYPE_NAMES = {
-    MessageType.INITIAL: "Initial",
-    MessageType.REVERSE_REQUEST: "ReverseRequest",
-    MessageType.REVERSE_ANSWER: "ReverseAnswer",
-    MessageType.CLOSE: "Close",
+    MessageType.INITIALIZATION: "Initialization",
+    MessageType.AGREE: "agree",
+    MessageType.REVERSE_REQUEST: "reverseRequest",
+    MessageType.REVERSE_ANSWER: "reverseAnswer",
 }
 
 

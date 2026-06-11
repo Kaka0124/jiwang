@@ -2,15 +2,19 @@
 """
 TCP 反转客户端 —— Task1
 ========================
-TCP 客户端，读取 ASCII 文本文件，按随机长度分块发送给服务端反转，
+TCP 客户端，读取 ASCII 文本文件，逐段随机长度分块发送给服务端反转，
 收到反转结果后逐块验证正确性，最后保存反转后的完整文件。
 
+分块算法（按任务书要求）：
+  先生成各块的随机长度 [Lmin, Lmax]，直到覆盖整个文件，再计算块数 N。
+  最后一块可能不足 Lmin（文件剩余部分）。
+
 用法：
-    python3 reversetcpclient.py <服务器IP> <端口> <Lmin> <Lmax> <输入文件> [块数]
+    python3 reversetcpclient.py <服务器IP> <端口> <Lmin> <Lmax> <输入文件> [seed]
 
 示例：
-    python3 reversetcpclient.py 127.0.0.1 8888 10 50 test_input.txt        # 随机块数
-    python3 reversetcpclient.py 127.0.0.1 8888 10 50 test_input.txt 8      # 指定8块
+    python3 reversetcpclient.py 127.0.0.1 8888 10 50 test_input.txt           # 随机
+    python3 reversetcpclient.py 127.0.0.1 8888 50 100 test.txt 42             # 指定种子
 """
 
 import socket
@@ -18,7 +22,6 @@ import struct
 import sys
 import random
 import time
-import os
 
 from tcp_protocol import (
     MessageType, TYPE_NAMES,
@@ -43,39 +46,45 @@ def read_file(filepath: str) -> str:
         return f.read()
 
 
-def split_into_chunks(text: str, lmin: int, lmax: int, num_chunks: int) -> list:
+def generate_chunks(text: str, lmin: int, lmax: int, seed: int = None) -> list:
     """
-    分块算法：将文本切分为 num_chunks 块，每块长度在 [lmin, lmax] 范围内随机。
-    如果分完 num_chunks 块后还有剩余文本，追加为最后一块。
+    【核心分块算法】按任务书要求实现：
+
+    1. 先设定随机种子（如有）
+    2. 不断生成 [Lmin, Lmax] 范围内的随机长度
+    3. 逐段从文件中切出，直到文件读完
+    4. 最后一块可能不足 Lmin（剩余部分直接作为一块）
+    5. 块数 N = 生成的块数
+
+    验收时老师会给定 seed，你需要能口算/手推出 N 及各块长度。
 
     参数：
-        text:       原始文本
-        lmin:       最小块长度
-        lmax:       最大块长度
-        num_chunks: 期望的分块数
+        text:  原始文本
+        lmin:  最小块长度
+        lmax:  最大块长度
+        seed:  随机种子（验收时指定，None 表示不设种子）
 
     返回：
-        字符串列表，每个元素为一个块
+        (字符串列表, N, 各块长度列表)
     """
+    if seed is not None:
+        random.seed(seed)
+
     chunks = []
+    lengths = []
     pos = 0
     text_len = len(text)
 
-    for i in range(num_chunks):
-        if pos >= text_len:
-            break
-        # 随机生成本块长度
+    while pos < text_len:
+        # 在 [lmin, lmax] 范围内随机生成本块长度
         chunk_len = random.randint(lmin, lmax)
-        # 不能超出剩余文本
+        # 最后一块不能超出文件末尾
         chunk_len = min(chunk_len, text_len - pos)
         chunks.append(text[pos:pos + chunk_len])
+        lengths.append(chunk_len)
         pos += chunk_len
 
-    # 剩余文本追加为最后一块
-    if pos < text_len:
-        chunks.append(text[pos:])
-
-    return chunks
+    return chunks, len(chunks), lengths
 
 
 def verify_reversal(original: str, received: str) -> bool:
@@ -90,10 +99,10 @@ def verify_reversal(original: str, received: str) -> bool:
 def main():
     """主函数"""
     if len(sys.argv) < 6 or len(sys.argv) > 7:
-        print(f"用法：python3 {sys.argv[0]} <服务器IP> <端口> <Lmin> <Lmax> <输入文件> [块数]")
+        print(f"用法：python3 {sys.argv[0]} <服务器IP> <端口> <Lmin> <Lmax> <输入文件> [seed]")
         print(f"示例：python3 {sys.argv[0]} 127.0.0.1 8888 10 50 test_input.txt")
-        print(f"      python3 {sys.argv[0]} 127.0.0.1 8888 10 50 test_input.txt 8  （指定8块）")
-        print(f"  块数：可选参数，不指定则随机(3~20)")
+        print(f"      python3 {sys.argv[0]} 127.0.0.1 8888 50 100 test.txt 42")
+        print(f"  seed：可选，随机种子。不指定则每次结果不同")
         sys.exit(1)
 
     # 解析命令行参数
@@ -102,7 +111,7 @@ def main():
     lmin = int(sys.argv[3])
     lmax = int(sys.argv[4])
     input_file = sys.argv[5]
-    specified_chunks = int(sys.argv[6]) if len(sys.argv) == 7 else None
+    seed = int(sys.argv[6]) if len(sys.argv) == 7 else None
 
     if lmin < 1 or lmax < lmin:
         log("错误：Lmin/Lmax 无效。需要 1 <= Lmin <= Lmax")
@@ -121,19 +130,13 @@ def main():
     total_bytes = len(text)
     log(f"读取输入文件 '{input_file}'：{total_bytes} 字节")
 
-    # 确定分块数：优先使用命令行指定值，否则随机生成
-    if specified_chunks is not None:
-        num_chunks = specified_chunks
-        log(f"使用指定分块数：{num_chunks}")
-    else:
-        max_chunks = max(3, total_bytes // lmin) if total_bytes >= lmin else 1
-        num_chunks = random.randint(3, min(max_chunks, 20))
-        log(f"随机分块数：{num_chunks}，Lmin={lmin}，Lmax={lmax}")
-
-    # 执行分块
-    chunks = split_into_chunks(text, lmin, lmax, num_chunks)
-    actual_chunks = len(chunks)
-    log(f"已切分为 {actual_chunks} 块")
+    # ---- 分块：先生成长度，再算 N ----
+    if seed is not None:
+        log(f"使用指定随机种子 seed={seed}")
+    chunks, N, lengths = generate_chunks(text, lmin, lmax, seed)
+    log(f"分块完成：N={N}，Lmin={lmin}，Lmax={lmax}")
+    for i, (chunk, length) in enumerate(zip(chunks, lengths), start=1):
+        log(f"  第{i}块长度：{length} 字节（起始={sum(lengths[:i-1])}）")
 
     # 连接服务端
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -145,43 +148,44 @@ def main():
         sys.exit(1)
 
     try:
-        # ---- 阶段1：Initial 握手（payload 携带 4 字节的块数 N）----
+        # ---- 阶段1：发送 Initialization（payload 携带 4 字节的 N）----
         start_time = time.time()
-        n_bytes = struct.pack("!I", actual_chunks)
-        sock.sendall(pack_message(MessageType.INITIAL, n_bytes))
-        log(f"发送 Initial（N={actual_chunks}）")
+        n_bytes = struct.pack("!I", N)
+        sock.sendall(pack_message(MessageType.INITIALIZATION, n_bytes))
+        log(f"发送 Initialization（N={N}）")
 
+        # 接收 agree
         msg_type, _ = recv_message(sock)
-        if msg_type != MessageType.INITIAL:
-            log(f"错误：期望 Initial ACK，收到 {TYPE_NAMES.get(msg_type, msg_type)}")
+        if msg_type != MessageType.AGREE:
+            log(f"错误：期望 agree，收到 {TYPE_NAMES.get(msg_type, msg_type)}")
             sys.exit(1)
-        log("收到 Initial ACK —— 连接已建立")
+        log("收到 agree —— 连接建立，开始传输")
 
-        # ---- 阶段2：逐块发送并验证反转结果 ----
+        # ---- 阶段2：逐块发送 reverseRequest / 接收 reverseAnswer ----
         output_chunks = []
         verification_errors = 0
 
         for i, chunk in enumerate(chunks, start=1):
             payload = chunk.encode("ascii")
 
-            # 发送 ReverseRequest
+            # 发送 reverseRequest
             sock.sendall(pack_message(MessageType.REVERSE_REQUEST, payload))
-            log(f"发送 ReverseRequest #{i}/{actual_chunks}：{len(payload)} 字节")
+            log(f"发送 reverseRequest #{i}/{N}：{len(payload)} 字节")
 
-            # 接收 ReverseAnswer
+            # 接收 reverseAnswer
             msg_type, reversed_payload = recv_message(sock)
             if msg_type != MessageType.REVERSE_ANSWER:
-                log(f"错误：期望 ReverseAnswer，收到 {TYPE_NAMES.get(msg_type, msg_type)}")
+                log(f"错误：期望 reverseAnswer，收到 {TYPE_NAMES.get(msg_type, msg_type)}")
                 verification_errors += 1
                 continue
 
             received_text = reversed_payload.decode("ascii")
-            log(f"收到 ReverseAnswer #{i}：{len(reversed_payload)} 字节")
+            log(f"收到 reverseAnswer #{i}：{len(reversed_payload)} 字节")
 
             # 打印反转后的文本（验收要求）
-            log(f"第{i}块：{received_text}")
+            print(f"{i}：{received_text}")
 
-            # 验证反转正确性：原文反转后应等于收到的结果
+            # 验证反转正确性
             if verify_reversal(chunk, received_text):
                 log(f"  ✓ 验证 #{i} 通过")
             else:
@@ -193,15 +197,9 @@ def main():
 
             output_chunks.append(received_text)
 
-        # ---- 阶段3：关闭连接（按协议规定，Close 由服务端发起）----
-        # 关闭写端，通知服务端数据发送完毕
+        # ---- 阶段3：数据传输完成，关闭连接 ----
         sock.shutdown(socket.SHUT_WR)
-        log("数据发送完毕 —— 等待服务端发送 Close")
-
-        msg_type, _ = recv_message(sock)
-        if msg_type == MessageType.CLOSE:
-            log("收到服务端 Close —— 连接正常关闭")
-
+        log("所有数据块发送完毕——连接关闭")
         elapsed = time.time() - start_time
 
         # ---- 写出反转结果文件 ----
@@ -214,8 +212,9 @@ def main():
         log(f"{'=' * 50}")
         log(f"汇总：")
         log(f"  文件：{input_file}（{total_bytes} 字节）")
-        log(f"  分块：{actual_chunks} 块（Lmin={lmin}，Lmax={lmax}）")
-        log(f"  验证错误：{verification_errors}/{actual_chunks}")
+        log(f"  分块：N={N}（Lmin={lmin}，Lmax={lmax}）")
+        log(f"  各块长度：{lengths}")
+        log(f"  验证错误：{verification_errors}/{N}")
         log(f"  耗时：{elapsed:.3f}s")
         if verification_errors == 0:
             log(f"  状态：✓ 全部验证通过")

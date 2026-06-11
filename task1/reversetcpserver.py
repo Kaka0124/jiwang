@@ -16,7 +16,6 @@ import socket
 import struct
 import threading
 import sys
-import os
 
 from tcp_protocol import (
     MessageType, TYPE_NAMES, HEADER_SIZE,
@@ -50,25 +49,29 @@ def handle_client(conn: socket.socket, addr: tuple, client_id: int):
     """
     在一个独立线程中处理一个客户端连接。
 
-    状态机：WAIT_INITIAL → PROCESSING → 发送Close → 断开
+    流程：
+        收到 Initialization(N) → 回复 agree → 循环收 reverseRequest/发 reverseAnswer → 客户端EOF
     """
     client_ip, client_port = addr
     log(f"[Client-{client_id}] 客户端连接来自 {client_ip}:{client_port}")
 
     try:
-        # ---- 阶段1：等待 Initial 报文 ----
+        # ---- 阶段1：等待 Initialization 报文（含 4 字节的 N）----
         msg_type, payload = recv_message(conn)
-        if msg_type != MessageType.INITIAL:
-            log(f"[Client-{client_id}] 错误：期望 Initial，收到 {TYPE_NAMES.get(msg_type, msg_type)}")
+        if msg_type != MessageType.INITIALIZATION:
+            log(f"[Client-{client_id}] 错误：期望 Initialization，收到 "
+                f"{TYPE_NAMES.get(msg_type, msg_type)}")
             conn.close()
             return
 
-        log(f"[Client-{client_id}] 收到 Initial —— 连接建立（N={struct.unpack('!I', payload)[0] if len(payload) >= 4 else '?'}）")
-        # 回复 Initial 确认
-        conn.sendall(pack_message(MessageType.INITIAL, b""))
-        log(f"[Client-{client_id}] 发送 Initial ACK")
+        N = struct.unpack("!I", payload)[0] if len(payload) >= 4 else 0
+        log(f"[Client-{client_id}] 收到 Initialization（N={N}）—— 连接建立")
 
-        # ---- 阶段2：循环处理 ReverseRequest ----
+        # 回复 agree
+        conn.sendall(pack_message(MessageType.AGREE, b""))
+        log(f"[Client-{client_id}] 发送 agree")
+
+        # ---- 阶段2：循环处理 reverseRequest ----
         request_count = 0
         while True:
             try:
@@ -83,16 +86,12 @@ def handle_client(conn: socket.socket, addr: tuple, client_id: int):
                 original = payload
                 reversed_data = reverse_bytes(original)
                 conn.sendall(pack_message(MessageType.REVERSE_ANSWER, reversed_data))
-                log(f"[Client-{client_id}] 请求 #{request_count}："
+                log(f"[Client-{client_id}] reverseRequest #{request_count}："
                     f"收到 {len(original)} 字节 → 反转 → 发回 {len(reversed_data)} 字节")
 
             else:
                 log(f"[Client-{client_id}] 警告：收到意外报文类型 "
                     f"{TYPE_NAMES.get(msg_type, msg_type)}")
-
-        # ---- 阶段3：服务端发送 Close（按协议规定，Close 由服务端发起）----
-        conn.sendall(pack_message(MessageType.CLOSE, b""))
-        log(f"[Client-{client_id}] 发送 Close")
 
     except (ConnectionError, OSError) as e:
         log(f"[Client-{client_id}] 连接错误：{e}")
