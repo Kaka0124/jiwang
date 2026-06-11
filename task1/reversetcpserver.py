@@ -13,6 +13,7 @@ TCP 反转服务端 —— Task1
 """
 
 import socket
+import struct
 import threading
 import sys
 import os
@@ -62,7 +63,7 @@ def handle_client(conn: socket.socket, addr: tuple, client_id: int):
             conn.close()
             return
 
-        log(f"[Client-{client_id}] 收到 Initial —— 连接建立")
+        log(f"[Client-{client_id}] 收到 Initial —— 连接建立（N={struct.unpack('!I', payload)[0] if len(payload) >= 4 else '?'}）")
         # 回复 Initial 确认
         conn.sendall(pack_message(MessageType.INITIAL, b""))
         log(f"[Client-{client_id}] 发送 Initial ACK")

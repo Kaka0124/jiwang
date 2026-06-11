@@ -14,6 +14,7 @@ TCP 客户端，读取 ASCII 文本文件，按随机长度分块发送给服务
 """
 
 import socket
+import struct
 import sys
 import random
 import time
@@ -144,10 +145,11 @@ def main():
         sys.exit(1)
 
     try:
-        # ---- 阶段1：Initial 握手 ----
+        # ---- 阶段1：Initial 握手（payload 携带 4 字节的块数 N）----
         start_time = time.time()
-        sock.sendall(pack_message(MessageType.INITIAL, b""))
-        log("发送 Initial")
+        n_bytes = struct.pack("!I", actual_chunks)
+        sock.sendall(pack_message(MessageType.INITIAL, n_bytes))
+        log(f"发送 Initial（N={actual_chunks}）")
 
         msg_type, _ = recv_message(sock)
         if msg_type != MessageType.INITIAL:
