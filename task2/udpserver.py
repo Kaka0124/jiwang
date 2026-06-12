@@ -24,7 +24,8 @@ import struct
 from udp_protocol import (
     UDPType, TYPE_NAMES, HEADER_SIZE,
     pack_message, unpack_message,
-    ConnState, timestamp,
+    ConnState, validate_student_id,
+    timestamp,
 )
 
 LOG_FILE = "run_log.txt"
@@ -114,23 +115,34 @@ class UDPServer:
     # ==================== 三次握手 ====================
 
     def _handle_syn(self, msg: dict, addr: tuple):
-        """处理 SYN：三次握手 第1步→第2步"""
-        client_seq = msg["seq"]     # 客户端初始序列号
-        student_id = msg.get("student_id", 0)  # 客户端学号后5位
+        """处理 SYN：三次握手 第1步→第2步（含 StudentID 验证）"""
+        client_seq = msg["seq"]
+        student_id = msg.get("student_id", 0)
+
+        # 验证 StudentID：再次 XOR 0x5A3C，检查是否在 0~9999 范围
+        valid, last4 = validate_student_id(student_id)
+        if not valid:
+            log(f"[服务端] [{addr[0]}:{addr[1]}] StudentID 验证失败！"
+                f"收到值={student_id}（0x{student_id:04X}），"
+                f"还原={last4}，不合法 —— 拒绝连接")
+            return  # 不回复，拒绝连接
+
+        log(f"[服务端] [{addr[0]}:{addr[1]}] StudentID 验证通过（学号后4位={last4}）")
 
         # 初始化客户端状态
         server_isn = random.randint(0, 2**31 - 1)
         self.clients[addr] = {
             "state": ConnState.SYN_RCVD,
             "server_isn": server_isn,
-            "expected_seq": client_seq + 1,  # 下一个期望的数据字节序号
+            "expected_seq": client_seq + 1,
             "received_data": bytearray(),
             "packets_received": 0,
             "client_student_id": student_id,
+            "student_last4": last4,
         }
 
         log(f"[服务端] [{addr[0]}:{addr[1]}] 收到 SYN（client_seq={client_seq}，"
-            f"StudentID={student_id}）→ SYN_RCVD")
+            f"StudentID=0x{student_id:04X}）→ SYN_RCVD")
         log(f"[服务端] [{addr[0]}:{addr[1]}] 发送 SYN-ACK（server_seq={server_isn}，"
             f"ack={client_seq + 1}）")
 

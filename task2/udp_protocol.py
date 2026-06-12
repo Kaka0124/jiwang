@@ -1,15 +1,15 @@
 """
 UDP 协议模块 —— Task2 共享常量与工具函数
 
-报文头部（20 字节）：
+报文头部（18 字节）：
   偏移  大小  字段
   0     2     报文类型（uint16 大端序）
-  2     4     StudentID（uint32 大端序）—— 学号后5位，连接建立报文必填
-  6     4     序列号（uint32 大端序）—— 字节流中的偏移量
-  10    4     确认号（uint32 大端序）—— 下一个期望的字节序号
-  14    2     校验和（uint16 大端序）—— IP 风格的 16-bit 反码求和
-  16    2     数据长度（uint16 大端序）—— 负载的字节数
-  18    2     保留 / 窗口大小
+  2     2     StudentID（uint16 大端序）—— 学号后4位 XOR 0x5A3C
+  4     4     序列号（uint32 大端序）—— 字节流中的偏移量
+  8     4     确认号（uint32 大端序）—— 下一个期望的字节序号
+  12    2     校验和（uint16 大端序）—— IP 风格的 16-bit 反码求和
+  14    2     数据长度（uint16 大端序）—— 负载的字节数
+  16    2     保留 / 窗口大小
 
 报文类型：
   0x0001 = SYN      — 连接请求（三次握手第1步）
@@ -25,12 +25,32 @@ import struct
 import enum
 import time
 
-HEADER_SIZE = 20
-# type(2) + student_id(4) + seq(4) + ack(4) + checksum(2) + data_len(2) + reserved(2)
-HEADER_FORMAT = "!HIIIHHH"
+HEADER_SIZE = 18
+# type(2) + student_id(2) + seq(4) + ack(4) + checksum(2) + data_len(2) + reserved(2)
+HEADER_FORMAT = "!HHIIHHH"
 
-# ============ 学号配置（改成你自己的学号后5位）============
-STUDENT_ID = 0          # TODO: 填写你的学号后5位，例如 6271
+# ============ StudentID 配置 ============
+STUDENT_ID_LAST4 = 2603  # 学号后4位
+STUDENT_ID_XOR = 0x5A3C  # XOR 常量（任务书规定）
+
+
+def compute_student_id(last4: int = None) -> int:
+    """
+    计算 StudentID 字段值：学号后4位 XOR 0x5A3C。
+    参数 last4：学号后4位数字（0~9999），默认使用全局 STUDENT_ID_LAST4。
+    """
+    if last4 is None:
+        last4 = STUDENT_ID_LAST4
+    return (last4 ^ STUDENT_ID_XOR) & 0xFFFF
+
+
+def validate_student_id(value: int) -> tuple:
+    """
+    验证 StudentID 字段：对收到的值再次 XOR 0x5A3C，检查是否在 0~9999 范围内。
+    返回 (是否合法, 还原后的学号后4位)。
+    """
+    last4 = (value ^ STUDENT_ID_XOR) & 0xFFFF
+    return (0 <= last4 <= 9999), last4
 
 
 class UDPType(enum.IntEnum):
@@ -57,7 +77,8 @@ TYPE_NAMES = {
 # ============ GBN 协议参数 ============
 WINDOW_SIZE = 400       # 固定发送窗口：400 字节
 TIMEOUT_MS = 300        # 超时重传时间：300ms
-MTU_PAYLOAD = 1400      # 每包最大数据负载（≤ 1500 - 头部）
+PAYLOAD_MIN = 40        # 每包最小数据负载（字节）
+PAYLOAD_MAX = 80        # 每包最大数据负载（字节）
 TOTAL_PACKETS = 30      # 总共发送 30 个数据包
 
 # ============ 连接状态机 ============
@@ -77,17 +98,13 @@ def checksum(data: bytes) -> int:
     将数据按 16 位字相加，处理进位，最后取反码。
     """
     total = 0
-    # 按 16 位字累加
     for i in range(0, len(data) - 1, 2):
         word = (data[i] << 8) + data[i + 1]
         total += word
-    # 处理奇数字节
     if len(data) % 2 == 1:
         total += data[-1] << 8
-    # 将进位加回低位
     while total >> 16:
         total = (total & 0xFFFF) + (total >> 16)
-    # 取反码
     return (~total) & 0xFFFF
 
 
@@ -101,7 +118,7 @@ def pack_message(msg_type: int, seq: int, ack: int, payload: bytes,
         seq:        序列号
         ack:        确认号
         payload:    负载数据
-        student_id: 学号后5位（默认使用全局 STUDENT_ID）
+        student_id: StudentID 字段值（默认自动计算）
         reserved:   保留字段
 
     校验和分两趟计算：
@@ -110,7 +127,7 @@ def pack_message(msg_type: int, seq: int, ack: int, payload: bytes,
       3. 用正确的校验和重新构建头部
     """
     if student_id is None:
-        student_id = STUDENT_ID
+        student_id = compute_student_id()
     data_len = len(payload)
     # 第一趟：校验和=0
     header = struct.pack(HEADER_FORMAT, msg_type, student_id, seq, ack, 0, data_len, reserved)
